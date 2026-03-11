@@ -87,7 +87,6 @@ ${0}:precmd() {
       _autocomplete__rbuffer
 }
 
-# function -T \
 .autocomplete:async:complete() {
   if [[ -v _autocomplete__inserted ]]; then
     unset _autocomplete__inserted
@@ -157,7 +156,6 @@ ${0}:precmd() {
   return 0
 }
 
-# function -T \
 .autocomplete:async:wait() {
   local fd=
 
@@ -183,12 +181,10 @@ ${0}:precmd() {
   return 0
 }
 
-# function -T \
 .autocomplete:async:wait:fd-widget() {
+  local -i fd=$1
   {
-    local -i fd=$1
     builtin zle -F $fd # Unhook ourselves immediately, so we don't get called more than once.
-    exec {fd}<&-
 
     if [[ -n $_autocomplete__zle_flags ]]; then
       builtin zle -f $_autocomplete__zle_flags
@@ -204,25 +200,31 @@ ${0}:precmd() {
       .autocomplete:async:same-state &&
           .autocomplete:async:start
     }
+  } always {
+    exec {fd}<&-
   }
   return 0
 }
 
-# function -T \
 .autocomplete:async:start() {
-  local fd=
-  sysopen -r -o cloexec -u fd <(
+  if [[ -v _autocomplete__async_fd && _autocomplete__async_fd -ge 10 ]]; then
+    # Unhook and close the previous fd. (If it no longer exists, then this will fail harmlessly.)
+    builtin zle -F "$_autocomplete__async_fd" 2>/dev/null
+    exec {_autocomplete__async_fd}<&- 2>/dev/null
+  fi
+
+  typeset -g _autocomplete__async_fd=
+  sysopen -r -o cloexec -u _autocomplete__async_fd <(
     local +h PS4=$_autocomplete__ps4
     .autocomplete:async:start:inner 2>>| $_autocomplete__log
   )
-  builtin zle -Fw "$fd" .autocomplete:async:complete:fd-widget
+  builtin zle -Fw "$_autocomplete__async_fd" .autocomplete:async:complete:fd-widget
 
   # WORKAROUND: https://github.com/zsh-users/zsh-autosuggestions/issues/364
   # There's a weird bug in Zsh < 5.8, where ^C stops working unless we force a fork.
   command true
 }
 
-# function -T \
 .autocomplete:async:start:inner() {
   {
     typeset -F SECONDS=0
@@ -278,18 +280,17 @@ ${0}:precmd() {
   }
 }
 
-# function -T \
 .autocomplete:async:pty() {
-  local +h PS4=$_autocomplete__ps4
+  typeset -g +h PS4=pty:$_autocomplete__ps4
 
-  # Make sure this shell dies after it times out.
-  local -F seconds=
+  # Force the shell to exit on timeout.
+  local -i seconds=
   builtin zstyle -s ":autocomplete:${curcontext}" timeout seconds ||
-      seconds=0.5
+      seconds=1
   TMOUT=$(( [#10] 1 + seconds ))
-
-  # WORKAROUND: #654 Inside the PTY, formatting can lead to incorrect list trimming.
-  eval ${${${"$( zstyle -L '*' format )"}//zstyle /zstyle -d }// -e / }
+  TRAPALRM() {
+    builtin exit
+  }
 
   builtin bindkey $'\C-@' .autocomplete:async:pty:zle-widget
   local __tmp__=
@@ -300,10 +301,7 @@ ${0}:precmd() {
   :
 }
 
-# function -T \
 .autocomplete:async:pty:zle-widget() {
-  local +h PS4=$_autocomplete__ps4
-
   setopt localoptions NO_banghist
 
   local -a _autocomplete__comp_mesg=()
@@ -319,7 +317,6 @@ ${0}:precmd() {
     [[ -n $curcontext ]] &&
         setopt $_autocomplete__ctxt_opts[@]
 
-    local +h PS4=$_autocomplete__ps4
     builtin zle .autocomplete:async:pty:completion-widget -w 2>>| $_autocomplete__log
   } always {
     print -rNC1 -- ${_autocomplete__list_lines:-0}$'\C-B'
@@ -327,10 +324,7 @@ ${0}:precmd() {
   }
 } 2>>| $_autocomplete__log
 
-# function -T \
 .autocomplete:async:pty:completion-widget() {
-  local +h PS4=$_autocomplete__ps4
-
   setopt localoptions banghist
   {
     if ! .autocomplete:async:sufficient-input; then
@@ -343,16 +337,15 @@ ${0}:precmd() {
     } always {
       _autocomplete__list_lines=$compstate[list_lines]
     }
-  } 2>>| $_autocomplete__log
-}
+  }
+} 2>>| $_autocomplete__log
 
-# function -T \
 .autocomplete:async:complete:fd-widget() {
   setopt localoptions NO_banghist
+  local -i fd=$1
 
   {
     local +h -F SECONDS=0.0
-    local -i fd=$1
     {
       builtin zle -F $fd # Unhook ourselves immediately, so we don't get called more than once.
 
@@ -376,6 +369,8 @@ ${0}:precmd() {
 
     } always {
       exec {fd}<&-
+      [[ -v _autocomplete__async_fd && $_autocomplete__async_fd == $fd ]] &&
+          unset _autocomplete__async_fd
     }
 
     [[ -n $curcontext ]] &&
@@ -383,7 +378,7 @@ ${0}:precmd() {
 
     # If a widget can't be called, zle always returns true.
     # Thus, we return false on purpose, so we can check if our widget got called.
-    local +h PS4=$_autocomplete__ps4
+    local +h PS4=zle:$_autocomplete__ps4
     if ! builtin zle ._list_choices -w "$reply[1]" 2>>| $_autocomplete__log; then
 
       typeset -g _autocomplete__overhead=$SECONDS
