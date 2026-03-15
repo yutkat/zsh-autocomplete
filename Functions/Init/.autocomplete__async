@@ -210,7 +210,7 @@ ${0}:precmd() {
   if [[ -v _autocomplete__async_fd && _autocomplete__async_fd -ge 10 ]]; then
     # Unhook and close the previous fd. (If it no longer exists, then this will fail harmlessly.)
     builtin zle -F "$_autocomplete__async_fd" 2>/dev/null
-    exec {_autocomplete__async_fd}<&- 2>/dev/null
+    { exec {_autocomplete__async_fd}<&- } 2>/dev/null
   fi
 
   typeset -g _autocomplete__async_fd=
@@ -347,7 +347,7 @@ ${0}:precmd() {
   {
     local +h -F SECONDS=0.0
     {
-      builtin zle -F $fd # Unhook ourselves immediately, so we don't get called more than once.
+      builtin zle -F $fd 2>/dev/null # Unhook ourselves immediately, so we don't get called more than once.
 
       if [[ -n $_autocomplete__zle_flags ]]; then
         builtin zle -f $_autocomplete__zle_flags
@@ -368,7 +368,7 @@ ${0}:precmd() {
       (( SECONDS += reply[2] ))
 
     } always {
-      exec {fd}<&-
+      { exec {fd}<&- } 2>/dev/null
       [[ -v _autocomplete__async_fd && $_autocomplete__async_fd == $fd ]] &&
           unset _autocomplete__async_fd
     }
